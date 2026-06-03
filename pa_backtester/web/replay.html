@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Crypto Replay MVP</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <aside class="sidebar">
+        <section class="panel">
+          <h1>Replay</h1>
+          <label>
+            Symbol
+            <input id="symbol" value="BTCUSDT">
+          </label>
+          <label>
+            Timeframe
+            <select id="timeframe">
+              <option value="1h">1h</option>
+            </select>
+          </label>
+          <label>
+            Start time
+            <input id="startTime" type="datetime-local">
+          </label>
+          <label>
+            Speed
+            <select id="speed">
+              <option value="1000">1x</option>
+              <option value="500">2x</option>
+              <option value="250">4x</option>
+              <option value="100">10x</option>
+            </select>
+          </label>
+          <button id="createSession">Start session</button>
+        </section>
+
+        <section class="panel controls">
+          <button id="playPause">Play</button>
+          <button id="nextBar">Next</button>
+          <button id="longBtn">Long</button>
+          <button id="shortBtn">Short</button>
+          <button id="closeBtn">Close</button>
+        </section>
+
+        <section class="panel">
+          <h2>Session</h2>
+          <dl>
+            <dt>Current</dt>
+            <dd id="currentTime">-</dd>
+            <dt>Price</dt>
+            <dd id="currentPrice">-</dd>
+            <dt>Buffer</dt>
+            <dd id="bufferCount">0</dd>
+            <dt>Realized PnL</dt>
+            <dd id="realizedPnl">0</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2>Trades</h2>
+          <div id="trades" class="trades"></div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <div id="chart"></div>
+        <div id="volume"></div>
+      </section>
+    </main>
+    <script src="/static/replay.js"></script>
+  </body>
+</html>

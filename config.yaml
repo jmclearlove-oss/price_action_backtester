@@ -1,0 +1,30 @@
+# 价格行为学交易分析框架配置
+symbol: BTC/USDT
+exchange: binance
+proxy: http://127.0.0.1:7897
+timeframe: 1h
+higher_timeframes: [4h, 1d]
+since: '2025-01-01T00:00:00Z'
+limit: 1500
+initial_cash: 10000
+fee_rate: 0.0006
+slippage_rate: 0.0002
+risk_per_trade: 0.01
+atr_period: 14
+atr_stop_multiplier: 1.8
+take_profit_r_multiple: 2.5
+min_rr: 1.5
+use_multitimeframe_confirmation: true
+plot_enabled: true
+export_trades_csv: true
+output_dir: outputs
+strategy:
+  ema_fast: 20
+  ema_slow: 50
+  swing_lookback: 4
+  breakout_lookback: 30
+  volume_window: 20
+  volume_spike_multiplier: 1.25
+  min_body_ratio: 0.45
+  pinbar_wick_ratio: 2.0
+  require_structure_alignment: true
