@@ -11,6 +11,9 @@ const state = {
 const FIB_EXTENSION_RATIOS = [1.272, 1.414, 1.618, 2.0, 2.24, 2.618, 3.0, 3.618, 4.236, 5.0, 6.854, 13.09];
 const FIB_BASE_RATIOS = [0, 1];
 const FIB_SWING_LOOKBACK = 4;
+const TRENDLINE_MIN_SCORE = 35;
+const TRENDLINE_MAX_VISIBLE = 6;
+const TRENDLINE_PIVOT_LIMIT = 18;
 
 const el = {
   symbol: document.querySelector('#symbol'),
@@ -35,6 +38,7 @@ const el = {
   fibLineColor: document.querySelector('#fibLineColor'),
   fibLineLength: document.querySelector('#fibLineLength'),
   fibLineWidth: document.querySelector('#fibLineWidth'),
+  trendEnabled: document.querySelector('#trendEnabled'),
 };
 
 const chartEl = document.querySelector('#chart');
@@ -104,7 +108,7 @@ function renderChart() {
   chart.timeScale().fitContent();
   volumeChart.timeScale().fitContent();
   renderCurrent();
-  drawFibBox();
+  drawOverlay();
 }
 
 async function nextBar() {
@@ -122,7 +126,7 @@ async function nextBar() {
   candleSeries.update(toChartCandle(candle));
   volumeSeries.update(toVolumeBar(candle));
   renderCurrent();
-  drawFibBox();
+  drawOverlay();
   if (state.buffer.length < 80) {
     prefetch();
   }
@@ -139,7 +143,7 @@ async function prefetch() {
     state.buffer.push(...data.candles);
   }
   renderCurrent();
-  drawFibBox();
+  drawOverlay();
 }
 
 function togglePlay() {
@@ -197,9 +201,14 @@ function renderCurrent() {
   el.bufferCount.textContent = String(state.buffer.length);
 }
 
-function drawFibBox() {
+function drawOverlay() {
   const canvasSize = syncFibCanvasSize();
   fibCtx.clearRect(0, 0, canvasSize.width, canvasSize.height);
+  drawFibBox(canvasSize);
+  drawScoredTrendlines(canvasSize);
+}
+
+function drawFibBox(canvasSize) {
   if (!el.fibEnabled.checked || state.visible.length < FIB_SWING_LOOKBACK * 2 + 1) {
     return;
   }
@@ -255,7 +264,123 @@ function drawFibBox() {
   fibCtx.restore();
 }
 
-function latestConfirmedSwingLeg(candles, lookback) {
+function drawScoredTrendlines(canvasSize) {
+  if (!el.trendEnabled.checked || state.visible.length < FIB_SWING_LOOKBACK * 2 + 1) {
+    return;
+  }
+
+  const lines = buildScoredTrendlines(state.visible);
+  for (const line of lines) {
+    const start = state.visible[line.start_idx];
+    const end = state.visible[state.visible.length - 1];
+    const x1 = chart.timeScale().timeToCoordinate(start.time);
+    const x2 = chart.timeScale().timeToCoordinate(end.time);
+    const y1 = candleSeries.priceToCoordinate(line.slope * line.start_idx + line.intercept);
+    const y2 = candleSeries.priceToCoordinate(line.slope * (state.visible.length - 1) + line.intercept);
+    if ([x1, x2, y1, y2].some((value) => value === null || Number.isNaN(value))) {
+      continue;
+    }
+
+    const alpha = 0.22 + (line.total_score / 100) * 0.58;
+    const width = 1 + (line.total_score / 100) * 4;
+    const color = line.side === 'support' ? `rgba(32, 180, 134, ${alpha})` : `rgba(239, 91, 91, ${alpha})`;
+    fibCtx.save();
+    fibCtx.strokeStyle = color;
+    fibCtx.lineWidth = width;
+    fibCtx.lineCap = 'round';
+    fibCtx.beginPath();
+    fibCtx.moveTo(x1, y1);
+    fibCtx.lineTo(x2, y2);
+    fibCtx.stroke();
+    fibCtx.restore();
+  }
+}
+
+function buildScoredTrendlines(candles) {
+  const pivots = collectConfirmedPivots(candles, FIB_SWING_LOOKBACK);
+  const lows = pivots.filter((pivot) => pivot.type === 'low').slice(-TRENDLINE_PIVOT_LIMIT);
+  const highs = pivots.filter((pivot) => pivot.type === 'high').slice(-TRENDLINE_PIVOT_LIMIT);
+  const supportLines = buildLinesFromPivots(candles, lows, 'support');
+  const resistanceLines = buildLinesFromPivots(candles, highs, 'resistance');
+  return [...supportLines, ...resistanceLines]
+    .filter((line) => line.total_score >= TRENDLINE_MIN_SCORE && line.touch_count >= 2)
+    .sort((a, b) => b.total_score - a.total_score)
+    .slice(0, TRENDLINE_MAX_VISIBLE);
+}
+
+function buildLinesFromPivots(candles, pivots, side) {
+  const lines = [];
+  for (let i = 0; i < pivots.length - 1; i += 1) {
+    for (let j = i + 1; j < pivots.length; j += 1) {
+      const first = pivots[i];
+      const second = pivots[j];
+      if (second.index - first.index < 8) {
+        continue;
+      }
+      const slope = (second.price - first.price) / (second.index - first.index);
+      const intercept = first.price - slope * first.index;
+      const line = {
+        slope,
+        intercept,
+        start_idx: first.index,
+        end_idx: second.index,
+        side,
+      };
+      const score = scoreTrendline(candles, line);
+      if (score) {
+        lines.push({ ...line, ...score });
+      }
+    }
+  }
+  return lines;
+}
+
+function scoreTrendline(candles, line, thresholdPct = 0.0005) {
+  const totalBars = candles.length;
+  const lineLength = line.end_idx - line.start_idx;
+  let touchCount = 0;
+  const deviations = [];
+  let lastTouchIdx = line.end_idx;
+
+  for (let idx = line.start_idx; idx < totalBars; idx += 1) {
+    const linePrice = line.slope * idx + line.intercept;
+    if (!Number.isFinite(linePrice) || linePrice <= 0) {
+      continue;
+    }
+
+    const candle = candles[idx];
+    const testedPrice = line.side === 'support' ? candle.low : candle.high;
+    const pctDiff = Math.abs(testedPrice - linePrice) / linePrice;
+    if (line.side === 'support' && idx > line.end_idx && testedPrice < linePrice * (1 - thresholdPct * 2)) {
+      break;
+    }
+    if (line.side === 'resistance' && idx > line.end_idx && testedPrice > linePrice * (1 + thresholdPct * 2)) {
+      break;
+    }
+    if (pctDiff <= thresholdPct) {
+      touchCount += 1;
+      deviations.push(pctDiff);
+      lastTouchIdx = idx;
+    }
+  }
+
+  const sTouch = Math.min(Math.max(40 + (touchCount - 2) * 15, 0), 100);
+  const sLength = Math.min((lineLength / 50) * 100, 100);
+  const avgDev = deviations.length ? deviations.reduce((sum, value) => sum + value, 0) / deviations.length : thresholdPct;
+  const sMse = Math.max(0, 100 * (1 - avgDev / thresholdPct));
+  const barsAgo = totalBars - 1 - lastTouchIdx;
+  const sRecency = Math.max(0, 100 * (1 - barsAgo / 100));
+  const totalScore = sTouch * 0.5 + sLength * 0.2 + sMse * 0.2 + sRecency * 0.1;
+  return {
+    total_score: totalScore,
+    touch_count: touchCount,
+    line_length: lineLength,
+    avg_deviation_pct: avgDev * 100,
+    bars_ago: barsAgo,
+  };
+}
+
+function collectConfirmedPivots(candles, lookback) {
   const pivots = [];
   for (let i = lookback; i < candles.length - lookback; i += 1) {
     const left = candles.slice(i - lookback, i);
@@ -270,8 +395,11 @@ function latestConfirmedSwingLeg(candles, lookback) {
       pivots.push({ type: 'low', time: candle.time, price: candle.low, index: i, confirmedAt: i + lookback });
     }
   }
+  return pivots.sort((a, b) => a.confirmedAt - b.confirmedAt || a.index - b.index);
+}
 
-  pivots.sort((a, b) => a.confirmedAt - b.confirmedAt || a.index - b.index);
+function latestConfirmedSwingLeg(candles, lookback) {
+  const pivots = collectConfirmedPivots(candles, lookback);
   const last = pivots[pivots.length - 1];
   if (!last) {
     return null;
@@ -389,10 +517,10 @@ function clamp(value, min, max) {
 window.addEventListener('resize', () => {
   chart.resize(chartEl.clientWidth, chartEl.clientHeight);
   volumeChart.resize(document.querySelector('#volume').clientWidth, document.querySelector('#volume').clientHeight);
-  drawFibBox();
+  drawOverlay();
 });
 
-chart.timeScale().subscribeVisibleTimeRangeChange(drawFibBox);
+chart.timeScale().subscribeVisibleTimeRangeChange(drawOverlay);
 
 el.createSession.addEventListener('click', () => createSession().catch(alert));
 el.playPause.addEventListener('click', togglePlay);
@@ -413,6 +541,7 @@ el.closeBtn.addEventListener('click', () => submitOrder('close').catch(alert));
   el.fibLineColor,
   el.fibLineLength,
   el.fibLineWidth,
-].forEach((control) => control.addEventListener('input', drawFibBox));
+  el.trendEnabled,
+].forEach((control) => control.addEventListener('input', drawOverlay));
 
 initCatalog().catch(alert);

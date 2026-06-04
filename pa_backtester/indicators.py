@@ -192,3 +192,85 @@ def calculate_fibonacci_extensions(
         )
 
     return out
+
+
+def score_trendline(
+    df: pd.DataFrame,
+    line_params: dict,
+    threshold_pct: float = 0.0005,
+    side: str = 'support',
+) -> tuple[float, dict]:
+    """对单条趋势线进行精细化评分。
+
+    参数：
+    - df: 至少包含 high / low 的 K 线 DataFrame。
+    - line_params: {'slope': k, 'intercept': b, 'start_idx': x1, 'end_idx': x2}
+    - threshold_pct: 触碰容差率，默认 0.05%。
+    - side: 'support' 使用 low 评分，'resistance' 使用 high 评分。
+
+    分数含义：
+    - 触碰次数越多，趋势线越重要；
+    - 跨度越长，越接近大级别结构；
+    - 触碰偏差越小，线越精准；
+    - 最近仍被触碰，时效性越强。
+    """
+    missing = [col for col in ('high', 'low') if col not in df.columns]
+    if missing:
+        raise ValueError(f'Missing columns: {missing}. Required columns: high, low')
+    if side not in ('support', 'resistance'):
+        raise ValueError("side must be 'support' or 'resistance'")
+
+    k = float(line_params['slope'])
+    b = float(line_params['intercept'])
+    x1 = int(line_params['start_idx'])
+    x2 = int(line_params['end_idx'])
+    total_bars = len(df)
+    if total_bars == 0 or x1 < 0 or x2 <= x1 or x1 >= total_bars:
+        raise ValueError('Invalid line_params index range')
+
+    line_length = x2 - x1
+    touch_count = 0
+    deviations: list[float] = []
+    last_touch_idx = x2
+
+    high = df['high'].to_numpy(dtype=float)
+    low = df['low'].to_numpy(dtype=float)
+
+    for idx in range(x1, total_bars):
+        line_price = k * idx + b
+        if line_price <= 0 or np.isnan(line_price):
+            continue
+
+        if side == 'support':
+            price = low[idx]
+            pct_diff = abs(price - line_price) / line_price
+            if idx > x2 and price < line_price * (1 - threshold_pct * 2):
+                break
+        else:
+            price = high[idx]
+            pct_diff = abs(price - line_price) / line_price
+            if idx > x2 and price > line_price * (1 + threshold_pct * 2):
+                break
+
+        if pct_diff <= threshold_pct:
+            touch_count += 1
+            deviations.append(float(pct_diff))
+            last_touch_idx = idx
+
+    s_touch = min(max(40 + (touch_count - 2) * 15, 0), 100)
+    s_length = min((line_length / 50) * 100, 100)
+    avg_dev = float(np.mean(deviations)) if deviations else threshold_pct
+    s_mse = max(0, 100 * (1 - (avg_dev / threshold_pct)))
+    bars_ago = total_bars - 1 - last_touch_idx
+    s_recency = max(0, 100 * (1 - (bars_ago / 100)))
+    total_score = (s_touch * 0.5) + (s_length * 0.2) + (s_mse * 0.2) + (s_recency * 0.1)
+
+    report_data = {
+        'total_score': round(total_score, 1),
+        'side': side,
+        'touch_count': touch_count,
+        'line_length': line_length,
+        'avg_deviation_pct': round(avg_dev * 100, 4),
+        'bars_ago': bars_ago,
+    }
+    return total_score, report_data
