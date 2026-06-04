@@ -8,6 +8,10 @@ const state = {
   timer: null,
 };
 
+const FIB_EXTENSION_RATIOS = [1.272, 1.414, 1.618, 2.0, 2.24, 2.618, 3.0, 3.618, 4.236, 5.0, 6.854, 13.09];
+const FIB_BASE_RATIOS = [0, 1];
+const FIB_SWING_LOOKBACK = 4;
+
 const el = {
   symbol: document.querySelector('#symbol'),
   timeframe: document.querySelector('#timeframe'),
@@ -24,9 +28,20 @@ const el = {
   bufferCount: document.querySelector('#bufferCount'),
   realizedPnl: document.querySelector('#realizedPnl'),
   trades: document.querySelector('#trades'),
+  fibEnabled: document.querySelector('#fibEnabled'),
+  fibFillColor: document.querySelector('#fibFillColor'),
+  fibFillOpacity: document.querySelector('#fibFillOpacity'),
+  fibBorderColor: document.querySelector('#fibBorderColor'),
+  fibLineColor: document.querySelector('#fibLineColor'),
+  fibLineLength: document.querySelector('#fibLineLength'),
+  fibLineWidth: document.querySelector('#fibLineWidth'),
 };
 
-const chart = LightweightCharts.createChart(document.querySelector('#chart'), {
+const chartEl = document.querySelector('#chart');
+const fibOverlay = document.querySelector('#fibOverlay');
+const fibCtx = fibOverlay.getContext('2d');
+
+const chart = LightweightCharts.createChart(chartEl, {
   layout: { background: { color: '#0f141a' }, textColor: '#c8d2dc' },
   grid: { vertLines: { color: '#1d2730' }, horzLines: { color: '#1d2730' } },
   rightPriceScale: { borderColor: '#2a3540' },
@@ -89,6 +104,7 @@ function renderChart() {
   chart.timeScale().fitContent();
   volumeChart.timeScale().fitContent();
   renderCurrent();
+  drawFibBox();
 }
 
 async function nextBar() {
@@ -106,6 +122,7 @@ async function nextBar() {
   candleSeries.update(toChartCandle(candle));
   volumeSeries.update(toVolumeBar(candle));
   renderCurrent();
+  drawFibBox();
   if (state.buffer.length < 80) {
     prefetch();
   }
@@ -122,6 +139,7 @@ async function prefetch() {
     state.buffer.push(...data.candles);
   }
   renderCurrent();
+  drawFibBox();
 }
 
 function togglePlay() {
@@ -177,6 +195,120 @@ function renderCurrent() {
   el.currentTime.textContent = state.current ? state.current.timestamp : '-';
   el.currentPrice.textContent = state.current ? formatNumber(state.current.close) : '-';
   el.bufferCount.textContent = String(state.buffer.length);
+}
+
+function drawFibBox() {
+  const canvasSize = syncFibCanvasSize();
+  fibCtx.clearRect(0, 0, canvasSize.width, canvasSize.height);
+  if (!el.fibEnabled.checked || state.visible.length < FIB_SWING_LOOKBACK * 2 + 1) {
+    return;
+  }
+
+  const swing = latestConfirmedSwingLeg(state.visible, FIB_SWING_LOOKBACK);
+  if (!swing) {
+    return;
+  }
+
+  const x1 = chart.timeScale().timeToCoordinate(swing.start.time);
+  const x2 = chart.timeScale().timeToCoordinate(swing.end.time);
+  const yHigh = candleSeries.priceToCoordinate(Math.max(swing.start.price, swing.end.price));
+  const yLow = candleSeries.priceToCoordinate(Math.min(swing.start.price, swing.end.price));
+  if ([x1, x2, yHigh, yLow].some((value) => value === null || Number.isNaN(value))) {
+    return;
+  }
+
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(yHigh, yLow);
+  const bottom = Math.max(yHigh, yLow);
+  const fillOpacity = clamp(Number(el.fibFillOpacity.value), 0, 0.35);
+  const borderColor = el.fibBorderColor.value;
+  const lineColor = el.fibLineColor.value;
+  const lineLengthBars = clamp(Number(el.fibLineLength.value), 2, 80);
+  const lineWidth = clamp(Number(el.fibLineWidth.value), 1, 8);
+  const barSpacing = Math.max(chart.timeScale().options().barSpacing || 6, 1);
+  const shortLineLength = lineLengthBars * barSpacing;
+
+  fibCtx.save();
+  fibCtx.fillStyle = hexToRgba(el.fibFillColor.value, fillOpacity);
+  fibCtx.strokeStyle = borderColor;
+  fibCtx.lineWidth = 1;
+  fibCtx.fillRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1));
+  fibCtx.strokeRect(left + 0.5, top + 0.5, Math.max(right - left, 1), Math.max(bottom - top, 1));
+
+  fibCtx.strokeStyle = lineColor;
+  fibCtx.lineWidth = lineWidth;
+  fibCtx.setLineDash([]);
+  fibCtx.lineCap = 'butt';
+  for (const level of fibLevelsForSwing(swing)) {
+    const y = candleSeries.priceToCoordinate(level.price);
+    if (y === null || Number.isNaN(y) || y < -20 || y > canvasSize.height + 20) {
+      continue;
+    }
+    const startX = Math.max(right - shortLineLength, left);
+    const endX = right;
+    fibCtx.beginPath();
+    fibCtx.moveTo(startX, y);
+    fibCtx.lineTo(endX, y);
+    fibCtx.stroke();
+  }
+  fibCtx.restore();
+}
+
+function latestConfirmedSwingLeg(candles, lookback) {
+  const pivots = [];
+  for (let i = lookback; i < candles.length - lookback; i += 1) {
+    const left = candles.slice(i - lookback, i);
+    const right = candles.slice(i + 1, i + lookback + 1);
+    const candle = candles[i];
+    const isHigh = left.every((item) => candle.high > item.high) && right.every((item) => candle.high > item.high);
+    const isLow = left.every((item) => candle.low < item.low) && right.every((item) => candle.low < item.low);
+    if (isHigh) {
+      pivots.push({ type: 'high', time: candle.time, price: candle.high, index: i, confirmedAt: i + lookback });
+    }
+    if (isLow) {
+      pivots.push({ type: 'low', time: candle.time, price: candle.low, index: i, confirmedAt: i + lookback });
+    }
+  }
+
+  pivots.sort((a, b) => a.confirmedAt - b.confirmedAt || a.index - b.index);
+  const last = pivots[pivots.length - 1];
+  if (!last) {
+    return null;
+  }
+  for (let i = pivots.length - 2; i >= 0; i -= 1) {
+    const previous = pivots[i];
+    if (previous.type !== last.type && previous.index < last.index) {
+      return { start: previous, end: last, direction: previous.type === 'low' ? 1 : -1 };
+    }
+  }
+  return null;
+}
+
+function fibLevelsForSwing(swing) {
+  const high = Math.max(swing.start.price, swing.end.price);
+  const low = Math.min(swing.start.price, swing.end.price);
+  const range = high - low;
+  const ratios = [...FIB_BASE_RATIOS, ...FIB_EXTENSION_RATIOS];
+  return ratios.map((ratio) => {
+    const price = swing.direction === 1 ? low + range * ratio : high - range * ratio;
+    return { ratio, price };
+  });
+}
+
+function syncFibCanvasSize() {
+  const rect = chartEl.getBoundingClientRect();
+  const pixelRatio = window.devicePixelRatio || 1;
+  const width = Math.max(Math.floor(rect.width * pixelRatio), 1);
+  const height = Math.max(Math.floor(rect.height * pixelRatio), 1);
+  if (fibOverlay.width !== width || fibOverlay.height !== height) {
+    fibOverlay.width = width;
+    fibOverlay.height = height;
+    fibOverlay.style.width = `${rect.width}px`;
+    fibOverlay.style.height = `${rect.height}px`;
+  }
+  fibCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  return { width: rect.width, height: rect.height };
 }
 
 function renderTrades(trades) {
@@ -238,10 +370,29 @@ function formatNumber(value) {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
+function hexToRgba(hex, alpha) {
+  const clean = hex.replace('#', '');
+  const value = Number.parseInt(clean, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function clamp(value, min, max) {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+}
+
 window.addEventListener('resize', () => {
-  chart.resize(document.querySelector('#chart').clientWidth, document.querySelector('#chart').clientHeight);
+  chart.resize(chartEl.clientWidth, chartEl.clientHeight);
   volumeChart.resize(document.querySelector('#volume').clientWidth, document.querySelector('#volume').clientHeight);
+  drawFibBox();
 });
+
+chart.timeScale().subscribeVisibleTimeRangeChange(drawFibBox);
 
 el.createSession.addEventListener('click', () => createSession().catch(alert));
 el.playPause.addEventListener('click', togglePlay);
@@ -254,6 +405,14 @@ el.speed.addEventListener('change', () => {
 el.longBtn.addEventListener('click', () => submitOrder('open_long').catch(alert));
 el.shortBtn.addEventListener('click', () => submitOrder('open_short').catch(alert));
 el.closeBtn.addEventListener('click', () => submitOrder('close').catch(alert));
+[
+  el.fibEnabled,
+  el.fibFillColor,
+  el.fibFillOpacity,
+  el.fibBorderColor,
+  el.fibLineColor,
+  el.fibLineLength,
+  el.fibLineWidth,
+].forEach((control) => control.addEventListener('input', drawFibBox));
 
 initCatalog().catch(alert);
-

@@ -70,6 +70,24 @@ label {
   font-size: 13px;
 }
 
+.inline-control {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.inline-control input {
+  width: auto;
+  min-height: auto;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 input,
 select {
   width: 100%;
@@ -79,6 +97,14 @@ select {
   padding: 0 10px;
   background: #0f141a;
   color: var(--text);
+}
+
+input[type="color"] {
+  padding: 4px;
+}
+
+input[type="range"] {
+  padding: 0;
 }
 
 button {
@@ -143,6 +169,20 @@ dd {
   background: #0f141a;
 }
 
+#chart {
+  position: relative;
+  overflow: hidden;
+}
+
+#fibOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 .trades {
   display: grid;
   gap: 8px;
@@ -172,4 +212,3 @@ dd {
     grid-template-rows: 420px 150px;
   }
 }
-

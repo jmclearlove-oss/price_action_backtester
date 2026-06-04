@@ -5,6 +5,22 @@ import pandas as pd
 from numpy.lib.stride_tricks import sliding_window_view
 
 
+FIB_EXTENSION_RATIOS: tuple[float, ...] = (
+    1.272,
+    1.414,
+    1.618,
+    2.000,
+    2.240,
+    2.618,
+    3.000,
+    3.618,
+    4.236,
+    5.000,
+    6.854,
+    13.090,
+)
+
+
 def ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
@@ -114,4 +130,65 @@ def calculate_adaptive_pivots(df: pd.DataFrame) -> pd.DataFrame:
 
     out['pivot_high'] = pivot_high
     out['pivot_low'] = pivot_low
+    return out
+
+
+def calculate_fibonacci_extensions(
+    df: pd.DataFrame,
+    pivot_high_col: str = 'pivot_high',
+    pivot_low_col: str = 'pivot_low',
+    prefix: str = 'fib_ext',
+    ratios: tuple[float, ...] | list[float] = FIB_EXTENSION_RATIOS,
+) -> pd.DataFrame:
+    """基于最近一组 pivot swing 追加 12 个机构常用斐波那契扩展位。
+
+    默认输出列覆盖完整 12 个扩展比例：1.272, 1.414, 1.618, 2.000, 2.240,
+    2.618, 3.000, 3.618, 4.236, 5.000, 6.854, 13.090。
+
+    计算逻辑：
+    - 最近结构是 pivot low -> pivot high：视为上行 impulse，扩展目标为
+      low + (high - low) * ratio，用于多头止盈和向上突破参考。
+    - 最近结构是 pivot high -> pivot low：视为下行 impulse，扩展目标为
+      high - (high - low) * ratio，用于空头止盈和向下突破参考。
+
+    注意：本函数是否存在未来函数，取决于输入的 pivot_high / pivot_low 是否已经
+    做了确认延迟。如果直接使用需要右侧 K 线确认的 pivot，请在确认完成后再暴露。
+    """
+    missing = [col for col in (pivot_high_col, pivot_low_col) if col not in df.columns]
+    if missing:
+        raise ValueError(f'Missing pivot columns: {missing}. Run calculate_adaptive_pivots first or provide pivot columns.')
+
+    out = df
+    high_pivots = out[pivot_high_col].astype(float)
+    low_pivots = out[pivot_low_col].astype(float)
+    row_no = pd.Series(np.arange(len(out), dtype=float), index=out.index)
+
+    last_high = high_pivots.ffill()
+    last_low = low_pivots.ffill()
+    last_high_row = row_no.where(high_pivots.notna()).ffill()
+    last_low_row = row_no.where(low_pivots.notna()).ffill()
+
+    has_leg = last_high.notna() & last_low.notna()
+    bullish_leg = has_leg & (last_low_row < last_high_row)
+    bearish_leg = has_leg & (last_high_row < last_low_row)
+    leg_range = (last_high - last_low).abs()
+
+    out[f'{prefix}_direction'] = np.select(
+        [bullish_leg.to_numpy(), bearish_leg.to_numpy()],
+        [1, -1],
+        default=0,
+    )
+    out[f'{prefix}_range'] = leg_range.where(has_leg)
+
+    for ratio in ratios:
+        label = f'{ratio:.3f}'.replace('.', '_')
+        col = f'{prefix}_{label}'
+        bullish_target = last_low + leg_range * ratio
+        bearish_target = last_high - leg_range * ratio
+        out[col] = np.select(
+            [bullish_leg.to_numpy(), bearish_leg.to_numpy()],
+            [bullish_target.to_numpy(), bearish_target.to_numpy()],
+            default=np.nan,
+        )
+
     return out

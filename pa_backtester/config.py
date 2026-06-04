@@ -17,6 +17,10 @@ class StrategyConfig:
     min_body_ratio: float = 0.45
     pinbar_wick_ratio: float = 2.0
     require_structure_alignment: bool = True
+    fibonacci_extension_ratios: list[float] = field(default_factory=lambda: [
+        1.272, 1.414, 1.618, 2.000, 2.240, 2.618,
+        3.000, 3.618, 4.236, 5.000, 6.854, 13.090,
+    ])
 
 
 @dataclass
