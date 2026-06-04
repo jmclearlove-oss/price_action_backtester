@@ -37,13 +37,42 @@ class Backtester:
             return 0.0
         return risk_cash / risk_per_unit
 
+    @staticmethod
+    def _valid_price(value) -> float | None:
+        if value is None or pd.isna(value):
+            return None
+        return float(value)
+
     def run(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         position = None
+        pending_signal = None
         for ts, row in df.iterrows():
             price = float(row['close'])
             self.equity_curve.append({'timestamp': ts, 'equity': self.cash})
             if pd.isna(row.get('atr')):
                 continue
+
+            if position is None and pending_signal is not None:
+                atr = float(row['atr'])
+                if pending_signal == 'long':
+                    entry = float(row['open']) * (1 + self.cfg.slippage_rate)
+                    atr_stop = entry - atr * self.cfg.atr_stop_multiplier
+                    swing_stop = self._valid_price(row.get('last_swing_low'))
+                    stop = min(swing_stop if swing_stop is not None else atr_stop, atr_stop)
+                    target = entry + (entry - stop) * self.cfg.take_profit_r_multiple
+                    qty = self._size_position(entry, stop)
+                    if qty > 0:
+                        position = {'side': 'long', 'entry_time': ts, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty, 'risk_cash': self.cash * self.cfg.risk_per_trade}
+                elif pending_signal == 'short':
+                    entry = float(row['open']) * (1 - self.cfg.slippage_rate)
+                    atr_stop = entry + atr * self.cfg.atr_stop_multiplier
+                    swing_stop = self._valid_price(row.get('last_swing_high'))
+                    stop = max(swing_stop if swing_stop is not None else atr_stop, atr_stop)
+                    target = entry - (stop - entry) * self.cfg.take_profit_r_multiple
+                    qty = self._size_position(entry, stop)
+                    if qty > 0:
+                        position = {'side': 'short', 'entry_time': ts, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty, 'risk_cash': self.cash * self.cfg.risk_per_trade}
+                pending_signal = None
 
             if position is not None:
                 exit_price = None
@@ -88,22 +117,11 @@ class Backtester:
                     position = None
                     self.equity_curve[-1]['equity'] = self.cash
 
-            if position is None:
-                atr = float(row['atr'])
+            if position is None and pending_signal is None:
                 if bool(row.get('long_signal', False)):
-                    entry = price * (1 + self.cfg.slippage_rate)
-                    stop = min(float(row.get('last_swing_low') or entry - atr * self.cfg.atr_stop_multiplier), entry - atr * self.cfg.atr_stop_multiplier)
-                    target = entry + (entry - stop) * self.cfg.take_profit_r_multiple
-                    qty = self._size_position(entry, stop)
-                    if qty > 0:
-                        position = {'side': 'long', 'entry_time': ts, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty, 'risk_cash': self.cash * self.cfg.risk_per_trade}
+                    pending_signal = 'long'
                 elif bool(row.get('short_signal', False)):
-                    entry = price * (1 - self.cfg.slippage_rate)
-                    stop = max(float(row.get('last_swing_high') or entry + atr * self.cfg.atr_stop_multiplier), entry + atr * self.cfg.atr_stop_multiplier)
-                    target = entry - (stop - entry) * self.cfg.take_profit_r_multiple
-                    qty = self._size_position(entry, stop)
-                    if qty > 0:
-                        position = {'side': 'short', 'entry_time': ts, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty, 'risk_cash': self.cash * self.cfg.risk_per_trade}
+                    pending_signal = 'short'
 
         trades_df = pd.DataFrame([asdict(t) for t in self.trades])
         equity_df = pd.DataFrame(self.equity_curve).drop_duplicates('timestamp').set_index('timestamp')

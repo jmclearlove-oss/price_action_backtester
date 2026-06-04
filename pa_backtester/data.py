@@ -62,7 +62,7 @@ def fetch_ohlcv(
 
 def resample_ohlcv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     rule = timeframe.replace('m', 'min').replace('h', 'h').replace('d', 'D')
-    out = df.resample(rule).agg({
+    out = df.resample(rule, label='right', closed='left').agg({
         'open': 'first',
         'high': 'max',
         'low': 'min',

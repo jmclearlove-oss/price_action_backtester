@@ -8,26 +8,33 @@ def detect_swings(df: pd.DataFrame, lookback: int = 4) -> pd.DataFrame:
     out = df.copy()
     out['swing_high'] = False
     out['swing_low'] = False
+    out['swing_high_price'] = np.nan
+    out['swing_low_price'] = np.nan
     for i in range(lookback, len(out) - lookback):
         window = out.iloc[i - lookback:i + lookback + 1]
-        idx = out.index[i]
-        out.loc[idx, 'swing_high'] = out.loc[idx, 'high'] == window['high'].max()
-        out.loc[idx, 'swing_low'] = out.loc[idx, 'low'] == window['low'].min()
-    out['last_swing_high'] = out['high'].where(out['swing_high']).ffill()
-    out['last_swing_low'] = out['low'].where(out['swing_low']).ffill()
+        candidate_idx = out.index[i]
+        confirmation_idx = out.index[i + lookback]
+        if out.loc[candidate_idx, 'high'] == window['high'].max():
+            out.loc[confirmation_idx, 'swing_high'] = True
+            out.loc[confirmation_idx, 'swing_high_price'] = out.loc[candidate_idx, 'high']
+        if out.loc[candidate_idx, 'low'] == window['low'].min():
+            out.loc[confirmation_idx, 'swing_low'] = True
+            out.loc[confirmation_idx, 'swing_low_price'] = out.loc[candidate_idx, 'low']
+    out['last_swing_high'] = out['swing_high_price'].ffill()
+    out['last_swing_low'] = out['swing_low_price'].ffill()
     return out
 
 
 def market_structure(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    swing_high_price = out['high'].where(out['swing_high'])
-    swing_low_price = out['low'].where(out['swing_low'])
+    swing_high_price = out['swing_high_price']
+    swing_low_price = out['swing_low_price']
     prev_swing_high = swing_high_price.ffill().shift()
     prev_swing_low = swing_low_price.ffill().shift()
-    out['higher_high'] = out['swing_high'] & (out['high'] > prev_swing_high)
-    out['lower_high'] = out['swing_high'] & (out['high'] < prev_swing_high)
-    out['higher_low'] = out['swing_low'] & (out['low'] > prev_swing_low)
-    out['lower_low'] = out['swing_low'] & (out['low'] < prev_swing_low)
+    out['higher_high'] = out['swing_high'] & (swing_high_price > prev_swing_high)
+    out['lower_high'] = out['swing_high'] & (swing_high_price < prev_swing_high)
+    out['higher_low'] = out['swing_low'] & (swing_low_price > prev_swing_low)
+    out['lower_low'] = out['swing_low'] & (swing_low_price < prev_swing_low)
     out['structure_score'] = 0
     out.loc[out['higher_high'] | out['higher_low'], 'structure_score'] = 1
     out.loc[out['lower_high'] | out['lower_low'], 'structure_score'] = -1
