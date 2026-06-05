@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Compile check
+        run: |
+          python -m compileall pa_backtester
+
+      - name: Run backtest smoke test
+        run: |
+          python run_backtest.py backtest --config config.yaml --csv sample_data/sample_ohlcv.csv
+
+      - name: FastAPI health check
+        run: |
+          uvicorn pa_backtester.replay_api:app --host 127.0.0.1 --port 8000 &
+          sleep 5
+          curl -f http://127.0.0.1:8000/api/health
+
+      - name: Package project
+        run: |
+          zip -r price_action_backtester_replay.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x "__pycache__/*" \
+            -x "*.pyc"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: price-action-backtester-replay
+          path: price_action_backtester_replay.zip
