@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import re
+from collections import defaultdict
 
 import pandas as pd
 
@@ -69,9 +70,10 @@ class ReplaySession:
 class CandleStore:
     """CSV K线数据仓库。
 
-    MVP 默认读取 sample_data/sample_ohlcv.csv，同时会扫描 data/*.csv 和
-    sample_data/*.csv。文件名如果类似 ``binance_BTCUSDT_1h.csv``，会自动识别
-    symbol=BTCUSDT、timeframe=1h。
+    默认读取 sample_data/sample_ohlcv.csv，同时会扫描 data/*.csv、
+    sample_data/*.csv，以及 binance_data/<symbol>/<timeframe>/*.csv。
+    Binance 月度文件会按同一 symbol/timeframe 合并成一个数据集，并在
+    catalog 中暴露缺失月份信息。
     """
 
     indicator_value_columns = {
@@ -115,6 +117,7 @@ class CandleStore:
             'start_time': self.df.index.min().isoformat(),
             'end_time': self.df.index.max().isoformat(),
             'source': str(active['source']),
+            'missing_months': active.get('missing_months', []),
             'indicator_specs': self.indicator_specs,
             'signal_marker_specs': self.signal_marker_specs,
         }
@@ -177,9 +180,15 @@ class CandleStore:
                 'start_time': df.index.min().isoformat(),
                 'end_time': df.index.max().isoformat(),
                 'source': str(path),
+                'source_type': 'csv',
+                'months': [],
+                'missing_months': [],
             }
+        for item in self._discover_binance_datasets():
+            dataset_id = f"{self._safe_id(item['symbol'])}_{self._safe_id(item['timeframe'])}_binance_{len(datasets) + 1}"
+            datasets[dataset_id] = {'id': dataset_id, **item}
         if not datasets:
-            raise FileNotFoundError('No OHLCV CSV found. Put CSV files in sample_data/ or data/.')
+            raise FileNotFoundError('No OHLCV CSV found. Put CSV files in sample_data/, data/, or binance_data/.')
         return datasets
 
     def _first_dataset_id(self) -> str:
@@ -189,7 +198,12 @@ class CandleStore:
         return next(iter(self.datasets))
 
     def _load_dataset(self, dataset_id: str) -> pd.DataFrame:
-        return load_csv(self.datasets[dataset_id]['source'])
+        dataset = self.datasets[dataset_id]
+        sources = dataset.get('sources')
+        if sources:
+            frames = [load_csv(path) for path in sources]
+            return pd.concat(frames).sort_index().loc[lambda df: ~df.index.duplicated(keep='last')]
+        return load_csv(dataset['source'])
 
     def _with_features(self, df: pd.DataFrame) -> pd.DataFrame:
         features, indicator_specs, signal_marker_specs = build_replay_features(df)
@@ -234,6 +248,9 @@ class CandleStore:
     @staticmethod
     def _infer_symbol_timeframe(path: Path) -> tuple[str, str]:
         stem = path.stem
+        monthly = CandleStore._parse_binance_month_file(path)
+        if monthly is not None:
+            return monthly[0], monthly[1]
         match = re.search(r'([A-Z0-9]+USDT|[A-Z0-9]+USD|[A-Z0-9]+BTC|[A-Z0-9]+ETH)[_-]([0-9]+[mhdwM])$', stem, re.IGNORECASE)
         if match:
             return match.group(1).upper(), match.group(2)
@@ -243,6 +260,77 @@ class CandleStore:
         if len(parts) >= 2:
             return parts[-2].upper(), parts[-1]
         return stem.upper(), '1h'
+
+    def _discover_binance_datasets(self) -> list[dict[str, Any]]:
+        root = Path('binance_data')
+        if not root.exists():
+            return []
+
+        grouped: dict[tuple[str, str], list[tuple[Path, str]]] = defaultdict(list)
+        for path in sorted(root.glob('*/*/*.csv')):
+            parsed = self._parse_binance_month_file(path)
+            if parsed is None:
+                continue
+            symbol, timeframe, month = parsed
+            grouped[(symbol, timeframe)].append((path, month))
+
+        datasets: list[dict[str, Any]] = []
+        for (symbol, timeframe), files in sorted(grouped.items()):
+            frames: list[pd.DataFrame] = []
+            sources: list[str] = []
+            months: list[str] = []
+            for path, month in sorted(files, key=lambda item: item[1]):
+                try:
+                    df = load_csv(path)
+                except Exception:
+                    continue
+                if df.empty:
+                    continue
+                frames.append(df)
+                sources.append(str(path))
+                months.append(month)
+            if not frames:
+                continue
+
+            merged = pd.concat(frames).sort_index().loc[lambda df: ~df.index.duplicated(keep='last')]
+            missing_months = self._missing_months(months)
+            datasets.append({
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'rows': int(len(merged)),
+                'start_time': merged.index.min().isoformat(),
+                'end_time': merged.index.max().isoformat(),
+                'source': f'binance_data/{symbol}/{timeframe}',
+                'sources': sources,
+                'source_type': 'binance_data',
+                'file_count': len(sources),
+                'months': months,
+                'missing_months': missing_months,
+            })
+        return datasets
+
+    @staticmethod
+    def _parse_binance_month_file(path: Path) -> tuple[str, str, str] | None:
+        match = re.match(
+            r'(?P<symbol>[A-Z0-9]+)[_-](?P<timeframe>[0-9]+[mhdwM])[-_](?P<year>\d{4})[-_](?P<month>\d{2})$',
+            path.stem,
+            re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        symbol = match.group('symbol').upper()
+        timeframe = match.group('timeframe')
+        month = f"{match.group('year')}-{match.group('month')}"
+        return symbol, timeframe, month
+
+    @staticmethod
+    def _missing_months(months: list[str]) -> list[str]:
+        if not months:
+            return []
+        periods = sorted({pd.Period(month, freq='M') for month in months})
+        expected = pd.period_range(periods[0], periods[-1], freq='M')
+        available = set(periods)
+        return [str(month) for month in expected if month not in available]
 
     @staticmethod
     def _normalize_symbol(symbol: str) -> str:

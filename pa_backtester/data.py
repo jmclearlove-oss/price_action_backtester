@@ -6,12 +6,20 @@ import pandas as pd
 
 
 def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    if 'timestamp' not in df.columns and 'open_time' in df.columns:
+        df = df.rename(columns={'open_time': 'timestamp'})
+
     expected = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     missing = [c for c in expected if c not in df.columns]
     if missing:
         raise ValueError(f'Missing columns: {missing}. Required columns: {expected}')
     out = df[expected].copy()
-    out['timestamp'] = pd.to_datetime(out['timestamp'], utc=True)
+    numeric_ts = pd.to_numeric(out['timestamp'], errors='coerce')
+    if numeric_ts.notna().all():
+        unit = 'ms' if numeric_ts.max() > 10_000_000_000 else 's'
+        out['timestamp'] = pd.to_datetime(numeric_ts, unit=unit, utc=True)
+    else:
+        out['timestamp'] = pd.to_datetime(out['timestamp'], utc=True)
     out = out.sort_values('timestamp').drop_duplicates('timestamp')
     out = out.set_index('timestamp')
     for c in ['open', 'high', 'low', 'close', 'volume']:

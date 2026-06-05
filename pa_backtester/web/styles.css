@@ -99,6 +99,27 @@ input, select {
 
 input:focus, select:focus { border-color: var(--accent); }
 
+.data-quality {
+  display: grid;
+  gap: 4px;
+  margin: -2px 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 8px;
+  background: #0d141c;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.data-quality.has-warning {
+  border-color: rgba(220, 174, 69, 0.7);
+  background: rgba(220, 174, 69, 0.1);
+}
+
+.data-quality-detail { color: var(--text); overflow-wrap: anywhere; }
+.data-quality.has-warning .data-quality-detail { color: var(--warning); }
+
 button {
   min-height: 36px;
   border: 1px solid #365164;

@@ -25,6 +25,7 @@ const TRENDLINE_PIVOT_LIMIT = 18;
 
 const el = {
   dataset: document.querySelector('#dataset'),
+  dataQuality: document.querySelector('#dataQuality'),
   symbol: document.querySelector('#symbol'),
   timeframe: document.querySelector('#timeframe'),
   startTime: document.querySelector('#startTime'),
@@ -109,7 +110,8 @@ function renderDatasetOptions(datasets) {
   for (const dataset of datasets) {
     const option = document.createElement('option');
     option.value = dataset.id;
-    option.textContent = `${dataset.symbol} ${dataset.timeframe} · ${dataset.rows} bars`;
+    const sourceLabel = dataset.source_type === 'binance_data' ? `Binance · ${dataset.file_count || 0} files` : 'CSV';
+    option.textContent = `${dataset.symbol} ${dataset.timeframe} · ${dataset.rows} bars · ${sourceLabel}`;
     option.dataset.symbol = dataset.symbol;
     option.dataset.timeframe = dataset.timeframe;
     option.dataset.start = dataset.start_time;
@@ -124,6 +126,7 @@ function renderDatasetOptions(datasets) {
 function applyDatasetSelection() {
   const option = el.dataset.selectedOptions[0];
   if (!option) return;
+  const selected = getSelectedDataset();
   el.symbol.value = option.dataset.symbol || 'BTCUSDT';
   el.timeframe.value = option.dataset.timeframe || '1h';
   const start = new Date(option.dataset.start);
@@ -131,6 +134,38 @@ function applyDatasetSelection() {
   const suggested = new Date(start.getTime() + Math.min(7 * 24 * 60 * 60 * 1000, Math.max(0, (end - start) * 0.2)));
   el.startTime.value = toDatetimeLocalUTC(suggested);
   el.chartTitle.textContent = `${el.symbol.value} · ${el.timeframe.value}`;
+  renderDataQuality(selected);
+}
+
+function getSelectedDataset() {
+  const datasetId = el.dataset.value;
+  return (state.catalog?.datasets || []).find((dataset) => dataset.id === datasetId) || null;
+}
+
+function renderDataQuality(dataset) {
+  if (!el.dataQuality || !dataset) return;
+  const months = dataset.months || [];
+  const missing = dataset.missing_months || [];
+  const source = dataset.source_type === 'binance_data'
+    ? `Binance ${dataset.file_count || months.length}个月文件`
+    : '单个CSV文件';
+  const range = months.length
+    ? `${months[0]} 至 ${months[months.length - 1]}`
+    : `${formatDateTime(dataset.start_time)} 至 ${formatDateTime(dataset.end_time)}`;
+
+  el.dataQuality.classList.toggle('has-warning', missing.length > 0);
+  el.dataQuality.innerHTML = '';
+
+  const summary = document.createElement('div');
+  summary.textContent = `${source} · ${range}`;
+  el.dataQuality.appendChild(summary);
+
+  const detail = document.createElement('div');
+  detail.className = 'data-quality-detail';
+  detail.textContent = missing.length
+    ? `缺失月份：${missing.join(', ')}`
+    : (months.length ? '月份连续：未发现缺失' : '未检测到月度缺口信息');
+  el.dataQuality.appendChild(detail);
 }
 
 function renderIndicatorControls() {
@@ -727,6 +762,12 @@ function datetimeLocalToIsoUTC(value) {
 
 function isoToUnix(value) {
   return Math.floor(new Date(value).getTime() / 1000);
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return toDatetimeLocalUTC(date).replace('T', ' ');
 }
 
 function formatNumber(value) {
