@@ -251,3 +251,157 @@ price_action_backtester/
     ├── replay_api.py
     └── strategy.py
 ```
+
+---
+
+## 11. Web K线回放终端 v0.2：TradingView-like 复盘版
+
+我在原来的 MVP 上补齐了更接近实战复盘的网页端能力：
+
+- 逐根 K 线回放：播放、暂停、下一根、倍速、分块预取；
+- 手动交易：开多、开空、平仓；
+- 交易记录：记录 entry / exit / qty / fee / gross pnl / net pnl / return_pct / note；
+- 交易持久化：每个 replay session 会写入 `outputs/replay_sessions/<session_id>/session.json` 和 `trades.csv`；
+- 前端交易标记：开仓和平仓会自动画在 K 线上；
+- 持仓价格线：开仓后自动显示入场价水平线；
+- 指标叠加：EMA、Range High/Low、Swing High/Low；
+- 策略信号叠加：已有价格行为策略的 `long_signal` / `short_signal` 会画在前端；
+- 自定义指标入口：编辑 `pa_backtester/user_replay_indicators.py` 即可把你的指标和策略画到网页端。
+
+### 11.1 启动网页端复盘
+
+```bash
+pip install -r requirements.txt
+uvicorn pa_backtester.replay_api:app --reload
+```
+
+浏览器打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+### 11.2 导入更多 K线数据
+
+把 CSV 放到：
+
+```text
+sample_data/
+data/
+```
+
+CSV 需要包含：
+
+```text
+timestamp,open,high,low,close,volume
+```
+
+推荐命名：
+
+```text
+data/binance_BTCUSDT_1h.csv
+data/binance_ETHUSDT_15m.csv
+data/binance_SOLUSDT_5m.csv
+```
+
+网页会自动扫描这些 CSV，并在 Dataset 下拉框里显示。
+
+### 11.3 手动交易记录
+
+网页中点击：
+
+```text
+开多 / 开空 / 平仓
+```
+
+系统会按当前播放到的 K 线收盘价成交，并计入：
+
+```text
+fee_rate
+slippage_rate
+qty
+```
+
+每个 session 的交易文件在：
+
+```text
+outputs/replay_sessions/<session_id>/trades.csv
+```
+
+也可以在网页点击“导出CSV”。
+
+### 11.4 添加你的指标
+
+编辑：
+
+```text
+pa_backtester/user_replay_indicators.py
+```
+
+示例：
+
+```python
+import pandas as pd
+
+
+def add_custom_replay_indicators(df: pd.DataFrame):
+    out = df.copy()
+    out['sma_200'] = out['close'].rolling(200).mean()
+
+    indicator_specs = [
+        {
+            'id': 'sma_200',
+            'label': 'SMA 200',
+            'kind': 'line',
+            'color': '#a78bfa',
+            'line_width': 2,
+            'default_visible': True,
+            'group': 'Custom',
+        }
+    ]
+
+    marker_specs = []
+    return out, indicator_specs, marker_specs
+```
+
+`indicator_specs` 里的 `id` 必须等于 DataFrame 里的列名。刷新网页后会自动出现在左侧“指标 / 策略”面板。
+
+### 11.5 添加你的策略信号
+
+同样编辑：
+
+```text
+pa_backtester/user_replay_indicators.py
+```
+
+示例：
+
+```python
+out['my_long_signal'] = (out['close'] > out['sma_200']) & (out['close'].shift(1) <= out['sma_200'].shift(1))
+
+marker_specs = [
+    {
+        'id': 'my_long_signal',
+        'label': '我的做多信号',
+        'column': 'my_long_signal',
+        'position': 'belowBar',
+        'shape': 'arrowUp',
+        'color': '#20b486',
+        'text': 'MY LONG',
+        'default_visible': True,
+        'group': 'Custom Strategy',
+    }
+]
+```
+
+刷新网页后，这些信号会像 TradingView 策略标记一样画在 K 线上。
+
+### 11.6 当前版本边界
+
+这个版本是本地单用户复盘终端，不是真实交易系统：
+
+- 不连接交易所下单；
+- 不做多用户权限；
+- 不做数据库持久化，只写本地 JSON / CSV；
+- 手动交易按当前 K 线 close 模拟成交；
+- 指标默认画在主图价格轴，RSI / MACD 这类副图指标后续建议做独立 pane。
