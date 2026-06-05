@@ -13,7 +13,7 @@ from .replay import CandleStore, ReplayService
 
 WEB_DIR = Path(__file__).resolve().parent / 'web'
 
-app = FastAPI(title='Crypto Replay MVP', version='0.1.0')
+app = FastAPI(title='Price Action Replay Terminal', version='0.2.0')
 store = CandleStore()
 service = ReplayService(store)
 
@@ -24,8 +24,12 @@ class CreateReplaySessionRequest(BaseModel):
     symbol: str = 'BTCUSDT'
     timeframe: str = '1h'
     start_time: str
-    context_bars: int = Field(default=200, ge=0, le=2000)
-    chunk_size: int = Field(default=500, ge=1, le=5000)
+    context_bars: int = Field(default=200, ge=0, le=5000)
+    chunk_size: int = Field(default=500, ge=1, le=10000)
+    initial_cash: float = Field(default=10000.0, gt=0)
+    fee_rate: float = Field(default=0.0006, ge=0, le=0.05)
+    slippage_rate: float = Field(default=0.0002, ge=0, le=0.05)
+    dataset_id: str | None = None
 
 
 class SubmitOrderRequest(BaseModel):
@@ -33,6 +37,7 @@ class SubmitOrderRequest(BaseModel):
     price: float = Field(gt=0)
     timestamp: str
     qty: float = Field(default=1.0, gt=0)
+    note: str = ''
 
 
 @app.get('/')
@@ -59,6 +64,10 @@ def create_session(payload: CreateReplaySessionRequest) -> dict:
             start_time=payload.start_time,
             context_bars=payload.context_bars,
             chunk_size=payload.chunk_size,
+            initial_cash=payload.initial_cash,
+            fee_rate=payload.fee_rate,
+            slippage_rate=payload.slippage_rate,
+            dataset_id=payload.dataset_id,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -76,7 +85,7 @@ def get_session(session_id: str) -> dict:
 def get_candles(
     session_id: str,
     cursor: str = Query(...),
-    limit: int = Query(default=500, ge=1, le=5000),
+    limit: int = Query(default=500, ge=1, le=10000),
 ) -> dict:
     try:
         return service.get_chunk(session_id, cursor, limit)
@@ -95,9 +104,18 @@ def submit_order(session_id: str, payload: SubmitOrderRequest) -> dict:
             price=payload.price,
             timestamp=payload.timestamp,
             qty=payload.qty,
+            note=payload.note,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+
+@app.get('/api/replay/sessions/{session_id}/trades.csv')
+def export_trades(session_id: str):
+    try:
+        path = service.export_trades_csv(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type='text/csv', filename=f'{session_id}_trades.csv')
