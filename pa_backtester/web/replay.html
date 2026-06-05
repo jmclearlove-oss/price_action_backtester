@@ -3,112 +3,149 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Crypto Replay MVP</title>
+    <title>Price Action Replay Terminal</title>
     <link rel="stylesheet" href="/static/styles.css">
     <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
     <main class="app">
       <aside class="sidebar">
+        <section class="panel hero">
+          <h1>K线回放终端</h1>
+          <p>历史K线逐根播放、手动开平仓、交易记录、指标/策略叠加。</p>
+        </section>
+
         <section class="panel">
-          <h1>Replay</h1>
+          <h2>数据与会话</h2>
           <label>
-            Symbol
-            <input id="symbol" value="BTCUSDT">
+            Dataset
+            <select id="dataset"></select>
           </label>
-          <label>
-            Timeframe
-            <select id="timeframe">
-              <option value="1h">1h</option>
-            </select>
-          </label>
+          <div class="field-grid">
+            <label>
+              Symbol
+              <input id="symbol" value="BTCUSDT">
+            </label>
+            <label>
+              Timeframe
+              <input id="timeframe" value="1h">
+            </label>
+          </div>
           <label>
             Start time
             <input id="startTime" type="datetime-local">
           </label>
-          <label>
-            Speed
-            <select id="speed">
-              <option value="1000">1x</option>
-              <option value="500">2x</option>
-              <option value="250">4x</option>
-              <option value="100">10x</option>
-            </select>
-          </label>
-          <button id="createSession">Start session</button>
+          <div class="field-grid">
+            <label>
+              Context bars
+              <input id="contextBars" type="number" min="0" max="5000" value="180">
+            </label>
+            <label>
+              Chunk size
+              <input id="chunkSize" type="number" min="1" max="10000" value="500">
+            </label>
+          </div>
+          <div class="field-grid">
+            <label>
+              Initial cash
+              <input id="initialCash" type="number" min="1" step="100" value="10000">
+            </label>
+            <label>
+              Qty
+              <input id="qty" type="number" min="0.000001" step="0.001" value="1">
+            </label>
+          </div>
+          <div class="field-grid">
+            <label>
+              Fee rate
+              <input id="feeRate" type="number" min="0" max="0.05" step="0.0001" value="0.0006">
+            </label>
+            <label>
+              Slippage
+              <input id="slippageRate" type="number" min="0" max="0.05" step="0.0001" value="0.0002">
+            </label>
+          </div>
+          <button id="createSession" class="primary">启动复盘</button>
         </section>
 
         <section class="panel controls">
-          <button id="playPause">Play</button>
-          <button id="nextBar">Next</button>
-          <button id="longBtn">Long</button>
-          <button id="shortBtn">Short</button>
-          <button id="closeBtn">Close</button>
+          <button id="playPause">播放</button>
+          <button id="nextBar">下一根</button>
+          <button id="fitChart">适配图表</button>
+          <label class="speed-field">
+            Speed
+            <select id="speed">
+              <option value="1200">0.8x</option>
+              <option value="1000" selected>1x</option>
+              <option value="500">2x</option>
+              <option value="250">4x</option>
+              <option value="100">10x</option>
+              <option value="50">20x</option>
+            </select>
+          </label>
         </section>
 
-        <section class="panel">
-          <h2>Session</h2>
-          <dl>
-            <dt>Current</dt>
-            <dd id="currentTime">-</dd>
-            <dt>Price</dt>
-            <dd id="currentPrice">-</dd>
-            <dt>Buffer</dt>
-            <dd id="bufferCount">0</dd>
-            <dt>Realized PnL</dt>
-            <dd id="realizedPnl">0</dd>
-          </dl>
-        </section>
-
-        <section class="panel">
-          <h2>Fib Box</h2>
-          <label class="inline-control">
-            <input id="fibEnabled" type="checkbox" checked>
-            Auto
-          </label>
+        <section class="panel trade-panel">
+          <h2>手动交易</h2>
           <label>
-            Fill color
-            <input id="fibFillColor" type="color" value="#20b486">
+            Note
+            <input id="orderNote" placeholder="可选：记录这笔交易原因">
           </label>
-          <label>
-            Fill opacity
-            <input id="fibFillOpacity" type="range" min="0" max="0.35" step="0.01" value="0.08">
-          </label>
-          <label>
-            Border color
-            <input id="fibBorderColor" type="color" value="#dcae45">
-          </label>
-          <label>
-            Line color
-            <input id="fibLineColor" type="color" value="#dcae45">
-          </label>
-          <div class="field-grid">
-            <label>
-              Length
-              <input id="fibLineLength" type="number" min="2" max="80" value="8">
-            </label>
-            <label>
-              Width
-              <input id="fibLineWidth" type="number" min="1" max="8" value="2">
-            </label>
+          <div class="trade-actions">
+            <button id="longBtn" class="long">开多</button>
+            <button id="shortBtn" class="short">开空</button>
+            <button id="closeBtn" class="close">平仓</button>
           </div>
         </section>
 
         <section class="panel">
-          <h2>Trend Lines</h2>
+          <h2>账户状态</h2>
+          <dl>
+            <dt>Current</dt><dd id="currentTime">-</dd>
+            <dt>Price</dt><dd id="currentPrice">-</dd>
+            <dt>Buffer</dt><dd id="bufferCount">0</dd>
+            <dt>Position</dt><dd id="positionState">-</dd>
+            <dt>Realized</dt><dd id="realizedPnl">0</dd>
+            <dt>Unrealized</dt><dd id="unrealizedPnl">0</dd>
+            <dt>Equity</dt><dd id="equity">0</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title-row">
+            <h2>指标 / 策略</h2>
+            <button id="toggleAllIndicators" class="mini">全选/取消</button>
+          </div>
+          <div id="indicatorToggles" class="toggle-list"></div>
+          <div id="signalToggles" class="toggle-list"></div>
+        </section>
+
+        <section class="panel compact">
+          <h2>自动画线</h2>
+          <label class="inline-control">
+            <input id="fibEnabled" type="checkbox" checked>
+            Fib Box
+          </label>
           <label class="inline-control">
             <input id="trendEnabled" type="checkbox" checked>
-            Auto score
+            趋势线评分
           </label>
         </section>
 
         <section class="panel">
-          <h2>Trades</h2>
+          <div class="panel-title-row">
+            <h2>交易记录</h2>
+            <button id="exportTrades" class="mini">导出CSV</button>
+          </div>
           <div id="trades" class="trades"></div>
         </section>
       </aside>
 
       <section class="workspace">
+        <div class="chart-toolbar">
+          <span id="chartTitle">未启动</span>
+          <span class="hint">提示：回放时只能看到已经播放出来的K线；指标/策略也只随K线逐步出现。</span>
+        </div>
         <div id="chart">
           <canvas id="fibOverlay"></canvas>
         </div>
