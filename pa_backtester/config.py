@@ -33,6 +33,27 @@ class MarketStructureConfig:
 
 
 @dataclass
+class RangeMarketConfig:
+    enabled: bool = True
+    timeframe: str = '15m'
+    lookback: int = 32
+    min_range_age_bars: int = 16
+    min_range_width_pct: float = 0.003
+    max_range_width_pct: float = 0.04
+    atr_ma_period: int = 96
+    atr_expand_multiplier: float = 1.15
+
+
+@dataclass
+class MeanReversionConfig:
+    enabled: bool = True
+    zscore_window: int = 96
+    zscore_entry_threshold: float = 1.5
+    entry_zone_pct: float = 0.2
+    exit_at_midline: bool = True
+
+
+@dataclass
 class AppConfig:
     symbol: str = 'BTC/USDT'
     exchange: str = 'binance'
@@ -55,6 +76,8 @@ class AppConfig:
     output_dir: str = 'outputs'
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     market_structure: MarketStructureConfig = field(default_factory=MarketStructureConfig)
+    range_market: RangeMarketConfig = field(default_factory=RangeMarketConfig)
+    mean_reversion: MeanReversionConfig = field(default_factory=MeanReversionConfig)
 
 
 def _merge_dataclass(cls, data: dict[str, Any]):
@@ -70,7 +93,11 @@ def load_config(path: str | Path) -> AppConfig:
         raw = yaml.safe_load(f) or {}
     strategy_raw = raw.pop('strategy', {}) or {}
     market_structure_raw = raw.pop('market_structure', {}) or {}
+    range_market_raw = raw.pop('range_market', {}) or {}
+    mean_reversion_raw = raw.pop('mean_reversion', {}) or {}
     cfg = _merge_dataclass(AppConfig, raw)
     cfg.strategy = _merge_dataclass(StrategyConfig, strategy_raw)
     cfg.market_structure = _merge_dataclass(MarketStructureConfig, market_structure_raw)
+    cfg.range_market = _merge_dataclass(RangeMarketConfig, range_market_raw)
+    cfg.mean_reversion = _merge_dataclass(MeanReversionConfig, mean_reversion_raw)
     return cfg

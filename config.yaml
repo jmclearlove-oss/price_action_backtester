@@ -24,6 +24,21 @@ market_structure:
   atr_multiplier: 2.0
   min_bars_between_swings: 3
   trend_lookback: 4
+range_market:
+  enabled: true
+  timeframe: 15m
+  lookback: 32
+  min_range_age_bars: 16
+  min_range_width_pct: 0.003
+  max_range_width_pct: 0.04
+  atr_ma_period: 96
+  atr_expand_multiplier: 1.15
+mean_reversion:
+  enabled: true
+  zscore_window: 96
+  zscore_entry_threshold: 1.5
+  entry_zone_pct: 0.2
+  exit_at_midline: true
 strategy:
   ema_fast: 20
   ema_slow: 50

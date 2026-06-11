@@ -340,6 +340,77 @@ outputs/event_study.html
 
 注意：统计优势不等于可以直接实盘交易。真正的交易系统还需要入场规则、退出规则、手续费/滑点、风控、容量、回撤约束和样本外验证。
 
+## 7.3 15m 震荡区间与均值回归
+
+震荡区间模块用于研究 15m 数据里的横盘结构，以及价格接近区间上下沿时是否存在均值回归机会。模块位于 `pa_backtester/range_market.py`，默认接入 `features_signals.csv`。
+
+配置：
+
+```yaml
+range_market:
+  enabled: true
+  timeframe: 15m
+  lookback: 32
+  min_range_age_bars: 16
+  min_range_width_pct: 0.003
+  max_range_width_pct: 0.04
+  atr_ma_period: 96
+  atr_expand_multiplier: 1.15
+
+mean_reversion:
+  enabled: true
+  zscore_window: 96
+  zscore_entry_threshold: 1.5
+  entry_zone_pct: 0.2
+  exit_at_midline: true
+```
+
+震荡区间判断只使用当前和历史数据，不使用未来 K 线。核心条件包括：
+
+- `trend_state == "RANGE"`；
+- 最近 `lookback` 根 K 线内没有 `bos_up` / `bos_down`；
+- 当前 `close` 位于已经确认的 `last_swing_high` 和 `last_swing_low` 之间；
+- 区间宽度 `(last_swing_high - last_swing_low) / close` 在配置范围内；
+- 当前 ATR 没有明显放大，即 `atr <= atr.rolling(atr_ma_period).mean() * atr_expand_multiplier`；
+- 条件连续维持至少 `min_range_age_bars` 根后，才标记为有效震荡区间。
+
+每个连续的 `is_range_market=True` 片段形成一个 range box。box 随 K 线逐步向右延伸，最终可视化时用：
+
+- `x0 = range_start_time`
+- `x1 = 当前片段最后一根 K 线时间`
+- `y0 = range_low`
+- `y1 = range_high`
+- `range_mid` 作为中轴线
+
+均值回归信号只在有效震荡区间内启用：
+
+- `mean_reversion_long`：价格接近区间下沿，且 `range_zscore <= -zscore_entry_threshold`；
+- `mean_reversion_short`：价格接近区间上沿，且 `range_zscore >= zscore_entry_threshold`；
+- `mean_reversion_exit_long`：多头 MR 状态下回到中轴、区间失效或出现 `bos_down`；
+- `mean_reversion_exit_short`：空头 MR 状态下回到中轴、区间失效或出现 `bos_up`。
+
+可视化：
+
+```bash
+python scripts/visualize_range_mean_reversion.py \
+  --csv outputs/features_signals.csv \
+  --output outputs/range_mean_reversion.html
+```
+
+图中会显示 close 折线、半透明 range box、`range_mid`、MR 入场/退出标记，以及 `BOS_UP` / `BOS_DOWN` 突破位置。Plotly 是可选依赖；如果当前环境没有 Plotly，脚本会提示并跳过 HTML，不影响核心特征生成。
+
+无未来函数验证：
+
+```bash
+python scripts/validate_no_lookahead_range.py \
+  --csv outputs/features_signals.csv \
+  --output outputs/no_lookahead_range_validation.json
+```
+
+验证脚本会先对完整数据计算一次特征，再逐根模拟：每次只传入 `df.iloc[:i+1]`，取最后一行结果，与完整计算的第 `i` 行关键字段比较。`mismatch_count` 必须为 `0`，否则说明批处理逻辑与逐根实时逻辑不一致，可能存在未来函数或状态污染。
+
+注意：该模块用于研究和回测辅助，不构成实盘建议。均值回归信号还需要结合手续费、滑点、止损止盈、风控、流动性和样本外验证。
+
 ## 8. 适合继续扩展的方向
 
 - 增加订单块 / FVG / 流动性扫单识别；

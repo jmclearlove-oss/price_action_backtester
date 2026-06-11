@@ -5,6 +5,7 @@ import pandas as pd
 from .indicators import add_base_indicators
 from .price_action import detect_swings, market_structure, detect_candle_patterns, support_resistance, trend_bias
 from .market_structure import add_market_structure_features
+from .range_market import add_mean_reversion_features, add_range_market_features
 from .data import resample_ohlcv
 
 
@@ -25,10 +26,18 @@ def prepare_features(df: pd.DataFrame, cfg) -> pd.DataFrame:
         out = market_structure(out)
     out = detect_candle_patterns(out, s.min_body_ratio, s.pinbar_wick_ratio)
     out = support_resistance(out, s.breakout_lookback)
+    out['support_range_high'] = out['range_high']
+    out['support_range_low'] = out['range_low']
     out['trend_bias'] = trend_bias(out)
     out['volume_spike'] = out['volume'] > out['vol_ma'] * s.volume_spike_multiplier
-    out['near_support'] = (out['close'] - out['range_low']).abs() <= out['atr'] * 0.6
-    out['near_resistance'] = (out['close'] - out['range_high']).abs() <= out['atr'] * 0.6
+    out['near_support'] = (out['close'] - out['support_range_low']).abs() <= out['atr'] * 0.6
+    out['near_resistance'] = (out['close'] - out['support_range_high']).abs() <= out['atr'] * 0.6
+    rm = getattr(cfg, 'range_market', None)
+    if rm is not None and getattr(rm, 'enabled', True):
+        out = add_range_market_features(out, rm)
+    mr = getattr(cfg, 'mean_reversion', None)
+    if mr is not None and getattr(mr, 'enabled', True):
+        out = add_mean_reversion_features(out, mr)
     return out
 
 
