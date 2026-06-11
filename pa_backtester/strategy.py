@@ -4,14 +4,25 @@ import pandas as pd
 
 from .indicators import add_base_indicators
 from .price_action import detect_swings, market_structure, detect_candle_patterns, support_resistance, trend_bias
+from .market_structure import add_market_structure_features
 from .data import resample_ohlcv
 
 
 def prepare_features(df: pd.DataFrame, cfg) -> pd.DataFrame:
     s = cfg.strategy
     out = add_base_indicators(df, s.ema_fast, s.ema_slow, cfg.atr_period, s.volume_window)
-    out = detect_swings(out, s.swing_lookback)
-    out = market_structure(out)
+    ms = getattr(cfg, 'market_structure', None)
+    if ms is not None and getattr(ms, 'enabled', True):
+        out = add_market_structure_features(
+            out,
+            atr_period=ms.atr_period,
+            atr_multiplier=ms.atr_multiplier,
+            min_bars_between_swings=ms.min_bars_between_swings,
+            trend_lookback=ms.trend_lookback,
+        )
+    else:
+        out = detect_swings(out, s.swing_lookback)
+        out = market_structure(out)
     out = detect_candle_patterns(out, s.min_body_ratio, s.pinbar_wick_ratio)
     out = support_resistance(out, s.breakout_lookback)
     out['trend_bias'] = trend_bias(out)

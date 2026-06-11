@@ -24,6 +24,15 @@ class StrategyConfig:
 
 
 @dataclass
+class MarketStructureConfig:
+    enabled: bool = True
+    atr_period: int = 14
+    atr_multiplier: float = 2.0
+    min_bars_between_swings: int = 3
+    trend_lookback: int = 4
+
+
+@dataclass
 class AppConfig:
     symbol: str = 'BTC/USDT'
     exchange: str = 'binance'
@@ -45,6 +54,7 @@ class AppConfig:
     export_trades_csv: bool = True
     output_dir: str = 'outputs'
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    market_structure: MarketStructureConfig = field(default_factory=MarketStructureConfig)
 
 
 def _merge_dataclass(cls, data: dict[str, Any]):
@@ -59,6 +69,8 @@ def load_config(path: str | Path) -> AppConfig:
     with open(path, 'r', encoding='utf-8') as f:
         raw = yaml.safe_load(f) or {}
     strategy_raw = raw.pop('strategy', {}) or {}
+    market_structure_raw = raw.pop('market_structure', {}) or {}
     cfg = _merge_dataclass(AppConfig, raw)
     cfg.strategy = _merge_dataclass(StrategyConfig, strategy_raw)
+    cfg.market_structure = _merge_dataclass(MarketStructureConfig, market_structure_raw)
     return cfg

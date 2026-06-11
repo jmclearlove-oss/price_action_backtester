@@ -168,6 +168,17 @@ strategy:
   fibonacci_extension_ratios: [1.272, 1.414, 1.618, 2.000, 2.240, 2.618, 3.000, 3.618, 4.236, 5.000, 6.854, 13.090]
 ```
 
+市场结构识别配置：
+
+```yaml
+market_structure:
+  enabled: true
+  atr_period: 14
+  atr_multiplier: 2.0
+  min_bars_between_swings: 3
+  trend_lookback: 4
+```
+
 ## 7. 信号逻辑概览
 
 ### 做多条件
@@ -189,6 +200,79 @@ strategy:
 - 高周期不逆势；
 - 出现看跌价格行为：看跌吞没、看跌 Pin Bar、强势阴线、向下突破、向上假突破；
 - 同时满足成交量放大、接近阻力、或突破确认之一。
+
+## 7.1 市场结构识别 v1
+
+第一阶段市场结构模块位于 `pa_backtester/market_structure.py`，默认已接入回测和 Web 复盘。
+
+### ATR 自适应 ZigZag 原理
+
+模块不再使用固定 lookback 来确认结构 swing，而是用 ATR 自适应阈值过滤噪声：
+
+- 上涨段中持续更新候选高点；
+- 当价格从候选高点回撤超过 `ATR * atr_multiplier`，确认 Swing High；
+- 下跌段中持续更新候选低点；
+- 当价格从候选低点反弹超过 `ATR * atr_multiplier`，确认 Swing Low；
+- 高点之间比较得到 `HH` / `LH`，低点之间比较得到 `HL` / `LL`；
+- 最近结构中同时出现 `HH + HL` 判为 `UPTREND`，同时出现 `LL + LH` 判为 `DOWNTREND`，否则为 `RANGE`；
+- 顺势突破最近结构高/低点标记为 BOS，逆势破坏当前趋势结构标记为 CHOCH。
+
+### 输出字段
+
+`outputs/features_signals.csv` 会包含这些市场结构字段：
+
+```text
+atr
+swing_high
+swing_low
+swing_label
+last_swing_high
+last_swing_low
+market_structure
+trend_state
+bos_up
+bos_down
+choch_up
+choch_down
+```
+
+字段含义：
+
+- `swing_high` / `swing_low`：当前 K 线是否确认了有效结构高点/低点；
+- `swing_label`：`H` / `L` / `HH` / `HL` / `LH` / `LL`；
+- `last_swing_high` / `last_swing_low`：最近确认结构高点/低点价格；
+- `market_structure`：最近一次结构标签；
+- `trend_state`：`UPTREND` / `DOWNTREND` / `RANGE`；
+- `bos_up` / `bos_down`：收盘价突破最近结构高点/跌破最近结构低点；
+- `choch_up` / `choch_down`：下跌趋势中向上破坏结构，或上涨趋势中向下破坏结构。
+
+### 查看方式
+
+回测后直接打开：
+
+```bash
+outputs/features_signals.csv
+```
+
+Web 复盘端会在左侧“指标 / 策略”面板中提供：
+
+- `Last Swing High` / `Last Swing Low` 线；
+- `HH` / `HL` / `LH` / `LL` 等结构 marker；
+- `BOS` / `CHOCH` marker。
+
+运行复盘：
+
+```bash
+uvicorn pa_backtester.replay_api:app --reload
+```
+
+然后访问：
+
+```text
+http://127.0.0.1:8000
+```
+
+注意：市场结构识别 v1 只是结构标签与事件识别模块，不直接代表买卖建议。策略是否使用这些字段，还需要结合趋势、形态、波动率、成交量、风控和样本外验证。
 
 ## 8. 适合继续扩展的方向
 

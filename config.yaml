@@ -18,6 +18,12 @@ use_multitimeframe_confirmation: true
 plot_enabled: true
 export_trades_csv: true
 output_dir: outputs
+market_structure:
+  enabled: true
+  atr_period: 14
+  atr_multiplier: 2.0
+  min_bars_between_swings: 3
+  trend_lookback: 4
 strategy:
   ema_fast: 20
   ema_slow: 50
