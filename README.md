@@ -274,6 +274,62 @@ http://127.0.0.1:8000
 
 注意：市场结构识别 v1 只是结构标签与事件识别模块，不直接代表买卖建议。策略是否使用这些字段，还需要结合趋势、形态、波动率、成交量、风控和样本外验证。
 
+## 7.2 BOS / CHOCH Event Study
+
+事件研究用于回答一个更具体的问题：当 `BOS`、`CHOCH` 或策略信号出现后，未来若干根 K 线的收益分布是否真的偏向有利方向。它不是回测撮合，也不考虑止损、止盈、滑点和仓位，只统计事件发生后的前瞻收益表现。
+
+运行：
+
+```bash
+python scripts/event_study.py \
+  --csv outputs/features_signals.csv \
+  --horizons 5 10 20 50 \
+  --output-dir outputs
+```
+
+默认会分析这些事件：
+
+```text
+bos_up
+bos_down
+choch_up
+choch_down
+long_signal
+short_signal
+```
+
+输出文件：
+
+```text
+outputs/event_study.csv
+outputs/event_study_summary.json
+outputs/event_study.html
+```
+
+如果当前环境没有安装 Plotly，脚本会跳过 `event_study.html`，但仍会正常输出 CSV 和 JSON。
+
+`event_study.csv` 字段含义：
+
+- `event`：事件列名；
+- `horizon`：向后观察的 K 线数量；
+- `count`：该事件在该 horizon 下拥有有效未来价格的数据点数量；
+- `mean_return`：未来收益均值，计算方式为 `close.shift(-horizon) / close - 1`；
+- `median_return`：未来收益中位数；
+- `win_rate`：方向胜率。`bos_up` / `choch_up` / `long_signal` 未来收益大于 0 记为 win；`bos_down` / `choch_down` / `short_signal` 未来收益小于 0 记为 win；
+- `max_return`：事件后的最大未来收益；
+- `min_return`：事件后的最小未来收益。
+
+判断 BOS / CHOCH 是否有统计优势时，不要只看单个 horizon 的均值。更稳妥的做法是同时观察：
+
+- `count` 是否足够，样本太少容易偶然；
+- `mean_return` 和 `median_return` 是否方向一致；
+- `win_rate` 是否持续高于随机水平；
+- 多个 horizon 上是否有一致性；
+- 上涨事件和下跌事件是否都有相对对称的表现；
+- 换不同市场、周期和样本外数据后是否仍然成立。
+
+注意：统计优势不等于可以直接实盘交易。真正的交易系统还需要入场规则、退出规则、手续费/滑点、风控、容量、回撤约束和样本外验证。
+
 ## 8. 适合继续扩展的方向
 
 - 增加订单块 / FVG / 流动性扫单识别；
