@@ -312,18 +312,28 @@ outputs/event_study.html
 
 - `event`：事件列名；
 - `horizon`：向后观察的 K 线数量；
+- `direction`：事件方向，`LONG` 表示向上事件，`SHORT` 表示向下事件；
 - `count`：该事件在该 horizon 下拥有有效未来价格的数据点数量；
-- `mean_return`：未来收益均值，计算方式为 `close.shift(-horizon) / close - 1`；
-- `median_return`：未来收益中位数；
-- `win_rate`：方向胜率。`bos_up` / `choch_up` / `long_signal` 未来收益大于 0 记为 win；`bos_down` / `choch_down` / `short_signal` 未来收益小于 0 记为 win；
-- `max_return`：事件后的最大未来收益；
-- `min_return`：事件后的最小未来收益。
+- `mean_return` / `median_return`：兼容旧版本的原始价格收益统计，等同于 `mean_price_return` / `median_price_return`；
+- `mean_price_return` / `median_price_return`：原始价格收益，计算方式为 `close.shift(-horizon) / close - 1`；
+- `mean_strategy_return` / `median_strategy_return`：按事件方向调整后的策略收益，计算方式为 `price_return * direction`，其中 `LONG=+1`、`SHORT=-1`；
+- `win_rate`：方向调整后的胜率，即 `strategy_return > 0` 的比例；
+- `avg_win`：`strategy_return > 0` 的平均盈利；
+- `avg_loss`：`strategy_return < 0` 的平均亏损绝对值；
+- `profit_factor`：盈利总和 / 亏损绝对值总和；
+- `expectancy`：`win_rate * avg_win - (1 - win_rate) * avg_loss`；
+- `edge_score`：用于粗排事件质量，当前公式为 `mean_strategy_return * win_rate * log1p(count)`；
+- `max_return` / `min_return`：原始价格收益的最大值和最小值。
+
+`price_return` 和 `strategy_return` 的区别很关键：做多事件后价格上涨是好事，所以两者方向一致；做空事件后价格下跌才是好事，因此原始 `price_return` 可能为负，但乘以 `SHORT=-1` 后的 `strategy_return` 会变成正收益。比如 `short_signal` 后价格下跌 1%，`price_return=-1%`，但对做空方向来说 `strategy_return=+1%`。
 
 判断 BOS / CHOCH 是否有统计优势时，不要只看单个 horizon 的均值。更稳妥的做法是同时观察：
 
 - `count` 是否足够，样本太少容易偶然；
-- `mean_return` 和 `median_return` 是否方向一致；
-- `win_rate` 是否持续高于随机水平；
+- 优先看 `mean_strategy_return` 和 `median_strategy_return` 是否为正且方向一致；
+- `expectancy` 是否为正，`profit_factor` 是否稳定高于 1；
+- `win_rate` 是否持续高于随机水平，但不要只看胜率，高胜率也可能被少数大亏抵消；
+- `edge_score` 排名前列的事件是否也有足够样本和稳定的期望；
 - 多个 horizon 上是否有一致性；
 - 上涨事件和下跌事件是否都有相对对称的表现；
 - 换不同市场、周期和样本外数据后是否仍然成立。
